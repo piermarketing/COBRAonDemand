@@ -1,0 +1,30 @@
+{
+  "name": "cobra-on-demand",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @cod/web",
+    "build": "npm run build -w @cod/web",
+    "start": "npm run start -w @cod/web",
+    "typecheck": "for p in rules billing integrations notices db core; do tsc -p packages/$p || exit 1; done && npm run typecheck -w @cod/web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "npm run lint -w @cod/web",
+    "db:generate": "npm run generate -w @cod/db",
+    "db:migrate": "npm run migrate -w @cod/db",
+    "db:seed": "npm run seed -w @cod/db"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
