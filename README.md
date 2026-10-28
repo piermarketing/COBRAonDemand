@@ -39,8 +39,8 @@ packages/billing       Admin-editable price tiers, pricing calculator, double-en
 packages/integrations  Canonical model, connector interface, census/plan CSV, sync diff → events, webhook HMAC, sandbox
 packages/db            Drizzle schema + migrations, field encryption (SSN/DOB/EIN), document storage, RLS SQL
 packages/core          Domain services: sign-up, setup hub, events, packets, enrollment, payments, jobs, dashboards
-infra/terraform        Cloud Run, Cloud SQL, KMS, Secret Manager, Storage, Scheduler (not applied yet)
-.github/workflows      CI (typecheck, tests, build, container) and deploy (WIF → staging on main, prod on tag)
+infra/gcp              One-time Google Cloud setup (bootstrap.sh) and custom domain + wildcard cert (domain.sh)
+.github/workflows      CI (typecheck, tests, build, container) and keyless deploy to Cloud Run
 ```
 
 ### Implemented
@@ -65,13 +65,26 @@ infra/terraform        Cloud Run, Cloud SQL, KMS, Secret Manager, Storage, Sched
 | Auth | Password sessions (signed cookies). Identity Platform with MFA (ONB-2) replaces this before go-live. |
 | Tenant isolation | Every query is scoped by `company_id` in the app layer. Postgres RLS policies are written (`packages/db/sql/rls.sql`) but turn on once requests set `app.company_id` and run as the non-owner role. |
 | Broker access (7a), user invites, takeover file import, remittance payouts, carrier write-back / EDI 834, Spanish notices, native app, advanced reporting, multi-state | Not started; the data model leaves room for them. |
-| Infra | Terraform is a reviewed draft, not applied; the HTTPS load balancer with the wildcard certificate depends on DNS hosting. |
 
 ### Needs a human decision or review
 
 - ERISA counsel review of every notice template (`packages/notices/src/templates.ts`), the agreements (`packages/core/src/agreements.ts`) and the ruleset (`packages/rules/src/config.ts`). The HIPP notice needs the official DHCS text inserted.
 - Manual administration fee amount (placeholder $25, `MANUAL_ADMIN_FEE_CENTS`), volume tier prices, and the default hold days before auto-send (3).
 - The open decisions listed in the requirements outline: remittance model, Finch vs Merge, TPA licensing, and the CA Administrator Certificate number shown in the footer.
+
+## Deploying to Google Cloud
+
+Staging runs on Cloud Run + Cloud SQL (Postgres 16) + Cloud Storage, with Secret Manager for keys and Cloud Scheduler for the deadline jobs. Use synthetic data only until the Google Cloud HIPAA BAA (and vendor BAAs) are signed.
+
+1. **Project.** Create a Google Cloud project with billing enabled (owner access). Accept the HIPAA BAA in the console before any real employee data.
+2. **Bootstrap (once).** In [Cloud Shell](https://shell.cloud.google.com):
+   ```bash
+   git clone https://github.com/piermarketing/COBRAonDemand.git && cd COBRAonDemand
+   PROJECT_ID=your-project-id bash infra/gcp/bootstrap.sh
+   ```
+   It prints seven `GCP_*` values. Add them as GitHub repository variables (not secrets; the script prints `gh` commands that do it).
+3. **Deploy.** GitHub → Actions → **Deploy** → Run workflow, ticking *seed demo data* the first time. Later pushes to `main` deploy automatically. The run summary shows the URL; the ops and employer passwords are in Secret Manager (`cod-seed-ops-password`, `cod-seed-employer-password`). Outside development the one-time code isn't shown on screen; read it in **Ops → Outbox** until email is connected.
+4. **Domain.** In Cloud Shell: `PROJECT_ID=… DOMAIN=cobraondemand.com bash infra/gcp/domain.sh`. Add the A, wildcard A and CNAME records it prints at your DNS provider. When the certificate is ACTIVE, add the repository variable `APP_DOMAIN` and re-run Deploy; enrollee links switch to `{company}.cobraondemand.com`.
 
 ## Configuration
 

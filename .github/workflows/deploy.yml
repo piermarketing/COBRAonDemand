@@ -1,13 +1,20 @@
 name: Deploy
 
-# main → staging automatically; a v* tag → prod after the "production"
-# environment's required reviewers approve (GH-5). Google Cloud auth uses
-# Workload Identity Federation, so no service-account keys live in GitHub (GH-3).
+# Deploys to the staging project set up by infra/gcp/bootstrap.sh. Google Cloud
+# auth is keyless (Workload Identity Federation), so no keys live in GitHub.
+# Runs on every push to main once the GCP_* repository variables exist, or by hand.
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "Load synthetic demo data (first deploy)"
+        type: boolean
+        default: false
+
+concurrency: deploy-staging
 
 permissions:
   contents: read
@@ -15,33 +22,84 @@ permissions:
 
 jobs:
   deploy:
+    if: vars.GCP_PROJECT_ID != ''
     runs-on: ubuntu-latest
-    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging' }}
+    timeout-minutes: 40
+    environment: staging
     env:
-      REGION: ${{ vars.GCP_REGION }}
       PROJECT: ${{ vars.GCP_PROJECT_ID }}
-      REPO: ${{ vars.GCP_ARTIFACT_REPO }}
+      REGION: ${{ vars.GCP_REGION }}
+      RUNTIME_SA: ${{ vars.GCP_RUNTIME_SA }}
+      SQL: ${{ vars.GCP_SQL_CONNECTION }}
+      BUCKET: ${{ vars.GCP_DOCUMENT_BUCKET }}
+      DOMAIN: ${{ vars.APP_DOMAIN }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOY_SA }}
+
       - uses: google-github-actions/setup-gcloud@v2
+
       - name: Build and push images
         run: |
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT/cobra-on-demand"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
           gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
-          IMAGE="$REGION-docker.pkg.dev/$PROJECT/$REPO"
           docker build --target web -t "$IMAGE/web:$GITHUB_SHA" .
           docker build --target tools -t "$IMAGE/tools:$GITHUB_SHA" .
           docker push "$IMAGE/web:$GITHUB_SHA"
           docker push "$IMAGE/tools:$GITHUB_SHA"
-      - name: Run database migrations (GH-6)
+
+      - name: Shared settings
         run: |
-          gcloud run jobs update cod-migrate --region "$REGION" \
-            --image "$REGION-docker.pkg.dev/$PROJECT/$REPO/tools:$GITHUB_SHA"
+          echo "SECRETS=DATABASE_URL=cod-database-url:latest,FIELD_ENCRYPTION_KEY=cod-field-encryption-key:latest,SESSION_SECRET=cod-session-secret:latest,CRON_SECRET=cod-cron-secret:latest" >> "$GITHUB_ENV"
+          ENVS="NODE_ENV=production,DB_SOCKET_DIR=/cloudsql/$SQL,DOCUMENT_STORAGE=gcs,DOCUMENT_BUCKET=$BUCKET"
+          if [ -n "$DOMAIN" ]; then
+            ENVS="$ENVS,APP_ROOT_DOMAIN=$DOMAIN,ENROLLEE_SUBDOMAINS=true"
+          fi
+          echo "ENVS=$ENVS" >> "$GITHUB_ENV"
+
+      - name: Run database migrations
+        run: |
+          gcloud run jobs deploy cod-migrate --region "$REGION" --image "$IMAGE/tools:$GITHUB_SHA" \
+            --service-account "$RUNTIME_SA" --set-cloudsql-instances "$SQL" \
+            --set-secrets "DATABASE_URL=cod-database-url:latest" --set-env-vars "NODE_ENV=production,DB_SOCKET_DIR=/cloudsql/$SQL" \
+            --command npm --args run,db:migrate --max-retries 0 --task-timeout 600s
           gcloud run jobs execute cod-migrate --region "$REGION" --wait
+
       - name: Deploy web
         run: |
-          gcloud run deploy cod-web --region "$REGION" \
-            --image "$REGION-docker.pkg.dev/$PROJECT/$REPO/web:$GITHUB_SHA"
+          gcloud run deploy cod-web --region "$REGION" --image "$IMAGE/web:$GITHUB_SHA" \
+            --service-account "$RUNTIME_SA" --add-cloudsql-instances "$SQL" \
+            --set-secrets "$SECRETS" --set-env-vars "$ENVS" \
+            --port 8080 --memory 1Gi --min-instances 0 --max-instances 10 --allow-unauthenticated
+          if [ -n "$DOMAIN" ]; then BASE="https://$DOMAIN"; else BASE="$(gcloud run services describe cod-web --region "$REGION" --format 'value(status.url)')"; fi
+          gcloud run services update cod-web --region "$REGION" --update-env-vars "APP_BASE_URL=$BASE"
+          echo "BASE=$BASE" >> "$GITHUB_ENV"
+          echo "### Deployed: $BASE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy scheduled jobs
+        run: |
+          for spec in "cod-jobs-hourly:send-election-notices" "cod-jobs-daily:all"; do
+            name="${spec%%:*}"; job="${spec#*:}"
+            gcloud run jobs deploy "$name" --region "$REGION" --image "$IMAGE/tools:$GITHUB_SHA" \
+              --service-account "$RUNTIME_SA" --set-cloudsql-instances "$SQL" \
+              --set-secrets "$SECRETS" --set-env-vars "$ENVS,APP_BASE_URL=$BASE" \
+              --command npm --args "run,job,--,$job" --max-retries 1 --task-timeout 1800s
+          done
+
+      - name: Seed demo data
+        if: inputs.seed
+        run: |
+          gcloud run jobs deploy cod-seed --region "$REGION" --image "$IMAGE/tools:$GITHUB_SHA" \
+            --service-account "$RUNTIME_SA" --set-cloudsql-instances "$SQL" \
+            --set-secrets "$SECRETS,SEED_OPS_PASSWORD=cod-seed-ops-password:latest,SEED_EMPLOYER_PASSWORD=cod-seed-employer-password:latest" \
+            --set-env-vars "$ENVS,APP_BASE_URL=$BASE,SEED_ALLOW_PRODUCTION=true" \
+            --command npm --args run,db:seed --max-retries 0
+          gcloud run jobs execute cod-seed --region "$REGION" --wait
+
+      - name: Smoke test
+        run: curl -fsS "$BASE/api/health"

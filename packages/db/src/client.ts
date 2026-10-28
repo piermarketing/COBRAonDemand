@@ -42,7 +42,9 @@ export function dataDir(): string {
 function create(): DbState {
   const url = process.env.DATABASE_URL;
   if (url) {
-    const client = postgres(url, { max: Number(process.env.DB_POOL_MAX ?? 10) });
+    // On Cloud Run, Cloud SQL is reached through its Unix socket (DB_SOCKET_DIR=/cloudsql/PROJECT:REGION:INSTANCE).
+    const socketDir = process.env.DB_SOCKET_DIR;
+    const client = postgres(url, { max: Number(process.env.DB_POOL_MAX ?? 10), ...(socketDir ? { host: socketDir } : {}) });
     const db = drizzlePostgres(client, { schema });
     const ready = process.env.DB_AUTO_MIGRATE === "true" ? migratePostgres(db, { migrationsFolder: migrationsFolder() }) : Promise.resolve();
     return { db, ready, driver: "postgres" };

@@ -22,9 +22,9 @@ export function appBaseUrl(): string {
   return process.env.APP_BASE_URL ?? "http://localhost:3000";
 }
 
-/** company.cobraondemand.com in production; /e/{slug} on localhost. */
+/** company.cobraondemand.com once the wildcard domain is live (ENROLLEE_SUBDOMAINS=true); otherwise {APP_BASE_URL}/e/{slug}. */
 export function enrolleeUrl(slug: string): string {
-  if (process.env.ENROLLEE_SUBDOMAINS === "true" || isProduction()) return `https://${slug}.${rootDomain()}`;
+  if (process.env.ENROLLEE_SUBDOMAINS === "true") return `https://${slug}.${rootDomain()}`;
   return `${appBaseUrl()}/e/${slug}`;
 }
 

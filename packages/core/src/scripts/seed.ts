@@ -103,10 +103,12 @@ if (!company) {
   console.log(`Demo termination: Avery Chen, ${termDate}. Verify with last 4 "1111" and DOB 1984-02-14 (spouse Riley: 1985-08-09).`);
 }
 
+// Passwords supplied through the environment (Secret Manager) are never echoed to logs.
+const shown = (pw: string, envName: string) => (process.env[envName] ? `(password in secret ${envName})` : pw);
 console.log(`
 Seeded.
-  Ops console     ${OPS_EMAIL} / ${OPS_PASSWORD}
-  Employer        ${EMPLOYER_EMAIL} / ${EMPLOYER_PASSWORD}
+  Ops console     ${OPS_EMAIL} / ${shown(OPS_PASSWORD, "SEED_OPS_PASSWORD")}
+  Employer        ${EMPLOYER_EMAIL} / ${shown(EMPLOYER_PASSWORD, "SEED_EMPLOYER_PASSWORD")}
   Enrollee portal ${enrolleeUrl(company.slug)}
 `);
 process.exit(0);
