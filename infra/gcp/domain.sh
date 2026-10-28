@@ -79,17 +79,26 @@ exists gcloud compute forwarding-rules describe cod-http-rule --global ||
 
 CNAME_NAME="$(gcloud certificate-manager dns-authorizations describe cod-dns-auth --format='value(dnsResourceRecord.name)')"
 CNAME_DATA="$(gcloud certificate-manager dns-authorizations describe cod-dns-auth --format='value(dnsResourceRecord.data)')"
+CNAME_HOST="${CNAME_NAME%.}"
+CNAME_HOST="${CNAME_HOST%".$DOMAIN"}"
 
 cat <<EOF
 
-$(say "Add these DNS records at your DNS provider for $DOMAIN")
-  Type   Name                                   Value
-  A      $DOMAIN (@)                            $IP
-  A      *.$DOMAIN                              $IP
-  CNAME  ${CNAME_NAME%.}   ${CNAME_DATA}
+$(say "Add these DNS records for $DOMAIN")
+Squarespace: Domains → $DOMAIN → DNS → DNS settings → Custom records → Add record.
+The Host column takes only the part before $DOMAIN.
 
-Remove any other A/AAAA/CNAME records for @ and * first. The certificate
-usually becomes ACTIVE 15–60 minutes after the records resolve. Check with:
+  Type    Host                 Data
+  A       @                    $IP
+  A       *                    $IP
+  CNAME   $CNAME_HOST   $CNAME_DATA
+
+Before adding them, delete the "Squarespace Defaults" A records and the www
+CNAME (ext-cust.squarespace.com) if they're there; the * record covers www.
+Keep any MX/TXT records for email. If a CAA record exists, also add:
+  CAA  @  0 issue "pki.goog"
+
+The certificate usually becomes ACTIVE 15–60 minutes after the records resolve. Check with:
 
   gcloud certificate-manager certificates describe cod-cert --format='value(managed.state)'
 

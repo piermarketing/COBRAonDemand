@@ -33,7 +33,7 @@ export const localStore: DocumentStore = {
   },
 };
 
-/** Cloud Storage: bucket with versioning and a retention policy (see infra/terraform). Objects are never overwritten. */
+/** Cloud Storage: bucket with versioning and a retention policy (see infra/gcp/bootstrap.sh). Objects are never overwritten. */
 function gcsStore(bucketName: string): DocumentStore {
   let bucket: import("@google-cloud/storage").Bucket | null = null;
   const get = async () => {
