@@ -1,0 +1,5 @@
+# Changes to the COBRA rules engine, notice templates and RLS policies need a
+# second reviewer. Replace with the real GitHub team or users, then uncomment.
+# /packages/rules/     @your-org/cobra-reviewers
+# /packages/notices/   @your-org/cobra-reviewers
+# /packages/db/sql/    @your-org/cobra-reviewers

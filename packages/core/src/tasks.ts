@@ -1,6 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getDb, tables } from "@cod/db";
 import { audit, type Actor } from "./audit";
+import { UserError } from "./companies";
 
 /** Ops exception queue (OPS-2): returned mail, failed payments, late events, deadline risks, reversals. */
 export async function openTask(input: {
@@ -36,7 +37,7 @@ export async function openTask(input: {
 }
 
 export async function resolveTask(taskId: string, resolution: string, actor: Actor) {
-  if (resolution.trim().length < 3) throw new Error("A resolution note is required (OPS-5).");
+  if (resolution.trim().length < 3) throw new UserError("A resolution note is required (OPS-5).");
   const db = await getDb();
   await db.update(tables.tasks).set({ status: "done", resolution, resolvedAt: new Date(), assignedTo: actor.id ?? null }).where(eq(tables.tasks.id, taskId));
   await audit(actor, { action: "task.resolved", entityType: "task", entityId: taskId, after: { resolution } });

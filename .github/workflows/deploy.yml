@@ -1,0 +1,47 @@
+name: Deploy
+
+# main → staging automatically; a v* tag → prod after the "production"
+# environment's required reviewers approve (GH-5). Google Cloud auth uses
+# Workload Identity Federation, so no service-account keys live in GitHub (GH-3).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'staging' }}
+    env:
+      REGION: ${{ vars.GCP_REGION }}
+      PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      REPO: ${{ vars.GCP_ARTIFACT_REPO }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build and push images
+        run: |
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT/$REPO"
+          docker build --target web -t "$IMAGE/web:$GITHUB_SHA" .
+          docker build --target tools -t "$IMAGE/tools:$GITHUB_SHA" .
+          docker push "$IMAGE/web:$GITHUB_SHA"
+          docker push "$IMAGE/tools:$GITHUB_SHA"
+      - name: Run database migrations (GH-6)
+        run: |
+          gcloud run jobs update cod-migrate --region "$REGION" \
+            --image "$REGION-docker.pkg.dev/$PROJECT/$REPO/tools:$GITHUB_SHA"
+          gcloud run jobs execute cod-migrate --region "$REGION" --wait
+      - name: Deploy web
+        run: |
+          gcloud run deploy cod-web --region "$REGION" \
+            --image "$REGION-docker.pkg.dev/$PROJECT/$REPO/web:$GITHUB_SHA"

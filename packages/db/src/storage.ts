@@ -4,8 +4,8 @@ import { dataDir } from "./client";
 
 /**
  * Document storage. Local filesystem in development; Cloud Storage with a
- * bucket retention policy in production (swap in by setting
- * DOCUMENT_STORAGE=gcs once the adapter is wired). Paths are content-addressed
+ * bucket retention policy in production (DOCUMENT_STORAGE=gcs,
+ * DOCUMENT_BUCKET=<bucket>). Paths are content-addressed
  * by the caller so a stored document can't be silently replaced.
  */
 
@@ -33,9 +33,40 @@ export const localStore: DocumentStore = {
   },
 };
 
+/** Cloud Storage: bucket with versioning and a retention policy (see infra/terraform). Objects are never overwritten. */
+function gcsStore(bucketName: string): DocumentStore {
+  let bucket: import("@google-cloud/storage").Bucket | null = null;
+  const get = async () => {
+    if (!bucket) {
+      const { Storage } = await import("@google-cloud/storage");
+      bucket = new Storage().bucket(bucketName);
+    }
+    return bucket;
+  };
+  return {
+    async put(key, bytes) {
+      assertSafeKey(key);
+      const file = (await get()).file(key);
+      try {
+        await file.save(Buffer.from(bytes), { resumable: false, preconditionOpts: { ifGenerationMatch: 0 }, contentType: "application/pdf" });
+      } catch (err) {
+        // 412 = object already exists; keys are content hashes, so it's the same bytes.
+        if ((err as { code?: number }).code !== 412) throw err;
+      }
+    },
+    async get(key) {
+      assertSafeKey(key);
+      const [data] = await (await get()).file(key).download();
+      return new Uint8Array(data);
+    },
+  };
+}
+
 export function documentStore(): DocumentStore {
   if (process.env.DOCUMENT_STORAGE === "gcs") {
-    throw new Error("Cloud Storage adapter not wired yet: set DOCUMENT_STORAGE=local or implement the GCS store");
+    const bucket = process.env.DOCUMENT_BUCKET;
+    if (!bucket) throw new Error("DOCUMENT_BUCKET is required when DOCUMENT_STORAGE=gcs");
+    return gcsStore(bucket);
   }
   return localStore;
 }

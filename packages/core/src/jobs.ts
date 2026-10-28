@@ -326,8 +326,8 @@ export const JOBS = {
 } as const;
 export type JobName = keyof typeof JOBS;
 
-export async function runJob(name: JobName, asOf = today()) {
-  const fn = JOBS[name];
+export async function runJob<N extends JobName>(name: N, asOf = today()): Promise<Awaited<ReturnType<(typeof JOBS)[N]>>> {
+  const fn = JOBS[name] as (asOf: string) => Promise<Awaited<ReturnType<(typeof JOBS)[N]>>>;
   if (!fn) throw new Error(`Unknown job ${name}`);
   const result = await fn(asOf);
   await audit(SYSTEM, { action: "job.ran", entityType: "job", entityId: name, after: { asOf, result } });
