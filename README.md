@@ -84,6 +84,7 @@ Staging runs on Cloud Run + Cloud SQL (Postgres 16) + Cloud Storage, with Secret
    ```
    It prints seven `GCP_*` values. Add them as GitHub repository variables (not secrets; the script prints `gh` commands that do it).
 3. **Deploy.** GitHub → Actions → **Deploy** → Run workflow, ticking *seed demo data* the first time. Later pushes to `main` deploy automatically. The run summary shows the URL; the ops and employer passwords are in Secret Manager (`cod-seed-ops-password`, `cod-seed-employer-password`). Outside development the one-time code isn't shown on screen; read it in **Ops → Outbox** until email is connected.
+   *Alternative (console route):* if the Cloud Run service was created in the console with "Continuously deploy from a repository", Cloud Build builds the Dockerfile on each push. Run `PROJECT_ID=… SERVICE=<service name> bash infra/gcp/configure-service.sh` once in Cloud Shell: it runs the bootstrap, connects the service to Cloud SQL, secrets and storage, turns on migrations at startup, creates the first ops login (`ops@cobraondemand.com`, password in secret `cod-seed-ops-password`) and schedules the deadline jobs. Skip the GitHub variables in that case.
 4. **Domain.** In Cloud Shell: `PROJECT_ID=… DOMAIN=cobraondemand.com bash infra/gcp/domain.sh`. Add the A, wildcard A and CNAME records it prints at your DNS provider. When the certificate is ACTIVE, add the repository variable `APP_DOMAIN` and re-run Deploy; enrollee links switch to `{company}.cobraondemand.com`.
 
 ## Configuration

@@ -273,3 +273,25 @@ export async function setModuleStatus(
     })
     .where(and(eq(tables.setupModules.companyId, companyId), eq(tables.setupModules.module, module)));
 }
+
+/**
+ * First ops login for a fresh deployment: when BOOTSTRAP_OPS_EMAIL and
+ * BOOTSTRAP_OPS_PASSWORD are set (from Secret Manager) and that user doesn't
+ * exist yet, create it. Never changes an existing user.
+ */
+export async function ensureBootstrapOpsUser() {
+  const email = process.env.BOOTSTRAP_OPS_EMAIL?.trim().toLowerCase();
+  const password = process.env.BOOTSTRAP_OPS_PASSWORD;
+  if (!email || !password) return;
+  const db = await getDb();
+  const [existing] = await db.select({ id: tables.users.id }).from(tables.users).where(eq(tables.users.email, email));
+  if (existing) return;
+  // Several instances may start at once; only the first insert wins.
+  const created = await db
+    .insert(tables.users)
+    .values({ email, passwordHash: await hashPassword(password), name: "COBRA on Demand Ops", kind: "ops" })
+    .onConflictDoNothing({ target: tables.users.email })
+    .returning({ id: tables.users.id });
+  if (created.length === 0) return;
+  await audit({ type: "system" }, { action: "ops.bootstrap_user_created", entityType: "user", after: { email } });
+}

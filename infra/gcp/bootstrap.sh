@@ -137,6 +137,8 @@ schedule() { # name cron cloud-run-job
 schedule cod-hourly "7 * * * *" cod-jobs-hourly
 schedule cod-daily "17 2 * * *" cod-jobs-daily
 
+[ -n "${SKIP_GITHUB_SUMMARY:-}" ] && exit 0
+
 cat <<EOF
 
 $(say "Done")

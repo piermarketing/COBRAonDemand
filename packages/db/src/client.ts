@@ -39,6 +39,18 @@ export function dataDir(): string {
   return process.env.DATA_DIR ?? path.join(repoRoot(), ".data");
 }
 
+/** Several Cloud Run instances can start at once; a Postgres advisory lock lets one migrate at a time. */
+async function migrateWithLock(client: ReturnType<typeof postgres>, db: Db) {
+  const reserved = await client.reserve();
+  try {
+    await reserved`select pg_advisory_lock(727001)`;
+    await migratePostgres(db, { migrationsFolder: migrationsFolder() });
+  } finally {
+    await reserved`select pg_advisory_unlock(727001)`;
+    reserved.release();
+  }
+}
+
 function create(): DbState {
   const url = process.env.DATABASE_URL;
   if (url) {
@@ -46,7 +58,7 @@ function create(): DbState {
     const socketDir = process.env.DB_SOCKET_DIR;
     const client = postgres(url, { max: Number(process.env.DB_POOL_MAX ?? 10), ...(socketDir ? { host: socketDir } : {}) });
     const db = drizzlePostgres(client, { schema });
-    const ready = process.env.DB_AUTO_MIGRATE === "true" ? migratePostgres(db, { migrationsFolder: migrationsFolder() }) : Promise.resolve();
+    const ready = process.env.DB_AUTO_MIGRATE === "true" ? migrateWithLock(client, db) : Promise.resolve();
     return { db, ready, driver: "postgres" };
   }
   const dir = path.join(dataDir(), "pglite");

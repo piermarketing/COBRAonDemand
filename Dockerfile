@@ -19,6 +19,14 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
+# Tooling image for Cloud Run jobs: `npm run db:migrate`, `npm run job -- all`.
+FROM build AS tools
+ENV NODE_ENV=production
+USER node
+CMD ["npm", "run", "db:migrate"]
+
+# The web stage is last so a plain `docker build` (and Cloud Run's
+# "deploy from repository") produces the web app.
 # Runtime: Next.js standalone server plus migrations.
 FROM node:22-bookworm-slim AS web
 WORKDIR /app
@@ -32,9 +40,3 @@ COPY --from=build --chown=app:app /app/packages/db/drizzle ./packages/db/drizzle
 USER app
 EXPOSE 8080
 CMD ["node", "apps/web/server.js"]
-
-# Tooling image for Cloud Run jobs: `npm run db:migrate`, `npm run job -- all`.
-FROM build AS tools
-ENV NODE_ENV=production
-USER node
-CMD ["npm", "run", "db:migrate"]
